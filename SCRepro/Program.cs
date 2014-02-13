@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Raven.Abstractions.Indexing;
+using Raven.Client;
 using Raven.Client.Embedded;
 using SCRepro.Indexes;
 using SCRepro.Models;
@@ -15,8 +16,6 @@ namespace SCRepro
 {
     class Program
     {
-        static long count = 0;
-
         static void Main(string[] args)
         {
             var dataDir = GetDbPath();
@@ -65,20 +64,23 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
 					}
 				});
 
-                var documentsPerThread = 10000;
+                const int documentsPerThread = 10000;
+                const bool doBulk = false;
+                const int bulkSize = 100;
                 Console.WriteLine("Pushing documents...");
+                if (doBulk)
+                {
+                    Console.WriteLine("(using bulk size of {0})", bulkSize);
+                }
 
                 var stopwatch = new Stopwatch();
                 stopwatch.Start();
 
                 Parallel.For(0, 10, l =>
-                                          {
-                                              Interlocked.Increment(ref count);
-
+                                    {
+                                        var session = documentStore.OpenSession();
                                               for (int i = 0; i < documentsPerThread; i++)
                                               {
-                                                  using (var session = documentStore.OpenSession())
-                                                  {
                                                       var msgGuid = Guid.NewGuid().ToString();
                                                       var msg = new ProcessedMessage
                                                             {
@@ -118,11 +120,16 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
                                                                 UniqueMessageId = msgGuid,
                                                             };
                                                       session.Store(msg);
+                                                  if (!doBulk || i%bulkSize == 0)
+                                                  {
                                                       session.SaveChanges();
+                                                      session.Dispose();
+                                                      session = documentStore.OpenSession();
                                                   }
                                               }
 
-                                              Interlocked.Decrement(ref count);
+                                              session.SaveChanges();
+                                              session.Dispose();
                                           });
 
                 Console.WriteLine("Finished pushing documents, waiting for indexing to complete...");
