@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -64,12 +65,17 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
 					}
 				});
 
-                Console.WriteLine("Starting to push documents...");
+                var documentsPerThread = 10000;
+                Console.WriteLine("Pushing documents...");
+
+                var stopwatch = new Stopwatch();
+                stopwatch.Start();
 
                 Parallel.For(0, 10, l =>
                                           {
                                               Interlocked.Increment(ref count);
-                                              for (int i = 0; i < 10000; i++)
+
+                                              for (int i = 0; i < documentsPerThread; i++)
                                               {
                                                   using (var session = documentStore.OpenSession())
                                                   {
@@ -115,19 +121,16 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
                                                       session.SaveChanges();
                                                   }
                                               }
+
                                               Interlocked.Decrement(ref count);
                                           });
 
-                var stats = documentStore.DatabaseCommands.GetStatistics();
-                while (Interlocked.Read(ref count) > 0)
-                {
-                    stats = documentStore.DatabaseCommands.GetStatistics();
-                    Console.WriteLine("{0} CurrentNumberOfItemsToIndexInSingleBatch: {1}", DateTime.UtcNow, stats.CurrentNumberOfItemsToIndexInSingleBatch);
-                    Thread.Sleep(1000);
-                }
-
                 Console.WriteLine("Finished pushing documents, waiting for indexing to complete...");
-               
+                stopwatch.Stop();
+                Console.WriteLine("Time to push {0} docs: {1}ms ({2} docs per sec on avg)", documentsPerThread * 10, stopwatch.ElapsedMilliseconds, (documentsPerThread * 10) / (stopwatch.ElapsedMilliseconds / 1000));
+                //Console.ReadKey();
+
+                var stats = documentStore.DatabaseCommands.GetStatistics();
                 while (stats.StaleIndexes.Length > 0)
                 {
                     Console.WriteLine("{0} Stale indexes: {1}", DateTime.UtcNow, stats.StaleIndexes.Length);
