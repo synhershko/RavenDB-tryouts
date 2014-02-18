@@ -67,8 +67,8 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
                     DisableInMemoryIndexing = true,
 				});
 
-                const int documentsPerThread = 10000;
-                const bool doBulk = false;
+                const int documentsPerThread = 50000;
+                const bool doBulk = true;
                 const int bulkSize = 100;
                 Console.WriteLine("Pushing documents...");
                 if (doBulk)
@@ -81,8 +81,9 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
 
                 Parallel.For(0, 10, l =>
                                     {
-                                        var session = documentStore.OpenSession();
-                                              for (int i = 0; i < documentsPerThread; i++)
+                                        using (var session = documentStore.BulkInsert())
+                                        {
+                                        for (int i = 0; i < documentsPerThread; i++)
                                               {
                                                       var msgGuid = Guid.NewGuid().ToString();
                                                       var msg = new ProcessedMessage
@@ -125,16 +126,7 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
                                                       session.Store(msg);
                                                       indexedMeter.Mark();
                                                   
-                                                  if (!doBulk || i%bulkSize == 0)
-                                                  {
-                                                      session.SaveChanges();
-                                                      session.Dispose();
-                                                      session = documentStore.OpenSession();
-                                                  }
-                                              }
-
-                                              session.SaveChanges();
-                                              session.Dispose();
+                                                    }}
                                           });
 
                 Console.WriteLine("Finished pushing documents, waiting for indexing to complete...");
