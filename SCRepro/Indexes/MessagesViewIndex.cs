@@ -68,6 +68,7 @@ namespace SCRepro.Indexes
                                               });
 
             Index(x => x.Query, FieldIndexing.Analyzed);
+            DisableInMemoryIndexing = true;
         }
     }
 }

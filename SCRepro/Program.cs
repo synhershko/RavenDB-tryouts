@@ -2,12 +2,11 @@
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using metrics;
+using metrics.Core;
 using Raven.Abstractions.Indexing;
-using Raven.Client;
 using Raven.Client.Embedded;
 using SCRepro.Indexes;
 using SCRepro.Models;
@@ -16,8 +15,11 @@ namespace SCRepro
 {
     class Program
     {
+        private static readonly MeterMetric indexedMeter = Metrics.Meter(typeof(ProcessedMessage), "messages", "indexed", TimeUnit.Seconds);
+
         static void Main(string[] args)
         {
+            Metrics.EnableConsoleReporting(10, TimeUnit.Seconds);
             var dataDir = GetDbPath();
             //Directory.Delete(dataDir);
 
@@ -61,7 +63,8 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
 					{
 						{"Tag", FieldTermVector.No},
 						{"LastModified", FieldTermVector.No}						
-					}
+					},
+                    DisableInMemoryIndexing = true,
 				});
 
                 const int documentsPerThread = 10000;
@@ -120,6 +123,8 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
                                                                 UniqueMessageId = msgGuid,
                                                             };
                                                       session.Store(msg);
+                                                      indexedMeter.Mark();
+                                                  
                                                   if (!doBulk || i%bulkSize == 0)
                                                   {
                                                       session.SaveChanges();
@@ -134,8 +139,10 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
 
                 Console.WriteLine("Finished pushing documents, waiting for indexing to complete...");
                 stopwatch.Stop();
-                Console.WriteLine("Time to push {0} docs: {1}ms ({2} docs per sec on avg)", documentsPerThread * 10, stopwatch.ElapsedMilliseconds, (documentsPerThread * 10) / (stopwatch.ElapsedMilliseconds / 1000));
-                //Console.ReadKey();
+                var elapsed = stopwatch.Elapsed;
+                Console.WriteLine("Time to push {0} docs: {1} ({2} docs per sec on avg)", documentsPerThread * 10, elapsed, (documentsPerThread * 10) / (stopwatch.ElapsedMilliseconds / 1000));
+                stopwatch = new Stopwatch();
+                stopwatch.Start();
 
                 var stats = documentStore.DatabaseCommands.GetStatistics();
                 while (stats.StaleIndexes.Length > 0)
@@ -145,9 +152,9 @@ select new { Tag, LastModified = (DateTime)doc[""@metadata""][""Last-Modified""]
                     Thread.Sleep(1000);
                     stats = documentStore.DatabaseCommands.GetStatistics();
                 }
+                stopwatch.Stop();
 
-                Console.WriteLine("Indexing complete");
-
+                Console.WriteLine("Indexing complete - waited {0} after the initial documents push (total of {1})", stopwatch.Elapsed, elapsed + stopwatch.Elapsed);
                 Console.ReadKey();
             }
         }
